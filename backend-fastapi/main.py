@@ -19,6 +19,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Prometheus Metrics
 REQUEST_COUNT = Counter(
     "model_predictions_total",
     "Total number of incident prediction requests received",
@@ -33,8 +34,10 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 MODEL_PATH = os.path.join(BASE_DIR, "models", "incident_classifier.pkl")
 DATA_PATH = os.path.join(BASE_DIR, "data", "incidents.csv")
 
+# Load trained model
 model = joblib.load(MODEL_PATH) if os.path.exists(MODEL_PATH) else None
 
+# Load historical incidents and precompute TF-IDF matrix for similarity search
 historical_df = None
 historical_tfidf = None
 startup_warning = None
@@ -68,7 +71,7 @@ class IncidentRequest(BaseModel):
 
 def analyze_related_and_metadata(query_text: str, environment: str, top_k: int = 3):
     if historical_df is None or historical_tfidf is None or model is None:
-        default_prio = "P1 - Critical" if environment.lower() == "production" else "P2 - High"
+        default_prio = "P1" if environment.lower() == "production" else "P2"
         return [], default_prio, 0.85, 45
 
     query_vec = model.named_steps["tfidf"].transform([query_text])
@@ -96,7 +99,6 @@ def analyze_related_and_metadata(query_text: str, environment: str, top_k: int =
             item["priority"] = prio_val
             priorities.append(prio_val)
 
-        # Check common resolution time column names in incidents.csv
         for col in ["resolution_time_minutes", "resolution_minutes", "mttr_minutes", "resolution_time", "duration_minutes"]:
             if col in historical_df.columns and pd.notna(row[col]):
                 try:
@@ -106,18 +108,60 @@ def analyze_related_and_metadata(query_text: str, environment: str, top_k: int =
 
         results.append(item)
 
-    # Derive priority from top matching historical incidents (or environment fallback)
     if priorities:
         predicted_priority = pd.Series(priorities).mode()[0]
         priority_conf = round(priorities.count(predicted_priority) / len(priorities), 4)
     else:
-        predicted_priority = "P1 - High" if environment.lower() == "production" else "P2 - Medium"
+        predicted_priority = "P1" if environment.lower() == "production" else "P2"
         priority_conf = 0.82
 
-    # Derive estimated resolution time in minutes
     est_minutes = int(round(sum(res_times) / len(res_times))) if res_times else (45 if "P1" in predicted_priority else 90)
 
     return results, predicted_priority, priority_conf, est_minutes
+
+
+def get_troubleshooting_steps(category: str, related_incidents: list) -> list[str]:
+    steps = []
+    for inc in related_incidents:
+        res = inc.get("resolution", "").strip()
+        if res and res not in steps:
+            steps.append(res)
+
+    if steps:
+        return steps[:4]
+
+    runbooks = {
+        "Performance": [
+            "Check CPU, memory, and I/O utilization metrics on affected nodes or services.",
+            "Inspect upstream API gateway latency, connection pool saturation, and slow queries.",
+            "Scale replicas horizontally or clear stale cache entries if resource thresholds exceed 85%."
+        ],
+        "Storage": [
+            "Inspect disk usage (df -h) and inode exhaustion across persistent volumes.",
+            "Rotate or archive uncompressed application logs and orphaned temporary files.",
+            "Expand storage volume capacity or detach unused snapshots."
+        ],
+        "Network": [
+            "Verify DNS resolution, ingress routing rules, and firewall security group policies.",
+            "Run packet loss and latency diagnostics between source and target endpoints.",
+            "Restart affected load balancer health checks or failover to secondary route."
+        ],
+        "Database": [
+            "Check active database locks, deadlocks, and long-running queries.",
+            "Verify connection pool limits and replication lag across read replicas.",
+            "Optimize missing indexes or kill blocking sessions after validation."
+        ],
+        "Security": [
+            "Isolate affected credentials, tokens, or compromised service accounts immediately.",
+            "Audit access logs for anomalous IP addresses or unauthorized privilege escalations.",
+            "Rotate secrets and enforce updated WAF/IAM policies."
+        ]
+    }
+    return runbooks.get(category, [
+        "Inspect recent deployment changes and service logs around the incident timestamp.",
+        "Verify health check endpoints and downstream service dependencies.",
+        "Escalate to the on-call SME with trace ID and diagnostic logs if issue persists."
+    ])
 
 
 @app.get("/")
@@ -170,6 +214,7 @@ def predict_incident(application: IncidentRequest):
         related, pred_priority, prio_confidence, est_minutes = analyze_related_and_metadata(
             combined_text, application.environment, top_k=application.top_k
         )
+        recommendations = get_troubleshooting_steps(prediction, related)
 
         REQUEST_COUNT.labels(category=prediction).inc()
         CONFIDENCE_GAUGE.set(cat_confidence)
@@ -183,13 +228,9 @@ def predict_incident(application: IncidentRequest):
             "predicted_priority": pred_priority,
             "priority": pred_priority,
             "priority_confidence": prio_confidence,
+            "estimated_resolution_time_minutes": est_minutes,
             "estimated_resolution_minutes": est_minutes,
-            "resolution_time_minutes": est_minutes,
-            "predicted_resolution_time": est_minutes,
-            "estimated_resolution_time": est_minutes,
-            "estimated_resolution": est_minutes,
-            "resolution_time": est_minutes,
-            "mttr": est_minutes,
+            "troubleshooting_recommendations": recommendations,
             "related_incidents": related,
             "similar_incidents": related,
             "status": "Success"
