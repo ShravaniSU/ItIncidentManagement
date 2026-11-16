@@ -185,6 +185,11 @@ def predict_incident(application: IncidentRequest):
             "priority_confidence": prio_confidence,
             "estimated_resolution_minutes": est_minutes,
             "resolution_time_minutes": est_minutes,
+            "predicted_resolution_time": est_minutes,
+            "estimated_resolution_time": est_minutes,
+            "estimated_resolution": est_minutes,
+            "resolution_time": est_minutes,
+            "mttr": est_minutes,
             "related_incidents": related,
             "similar_incidents": related,
             "status": "Success"
