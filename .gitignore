@@ -6,7 +6,6 @@
 backend-fastapi/.env
 config.json
 
-data/
 outputs/
 frontend/.env.example
 
