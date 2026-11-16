@@ -1,0 +1,19 @@
+name: incident-triage-env
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.10
+  - pip=24.0
+  - pandas=2.2.3
+  - numpy=1.26.4
+  - scikit-learn=1.5.2
+  - pip:
+      - azure-ai-ml==1.20.0
+      - azure-identity==1.19.0
+      - mlflow==2.19.0
+      - fastapi==0.115.6
+      - uvicorn==0.34.0
+      - pydantic==2.10.5
+      - pytest==8.3.4
+      - requests==2.32.3

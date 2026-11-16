@@ -1,0 +1,54 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: incident-triage-api
+  namespace: incident-triage-ns
+  labels:
+    app: incident-triage-api
+spec:
+  replicas: 2
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app: incident-triage-api
+  template:
+    metadata:
+      labels:
+        app: incident-triage-api
+    spec:
+      containers:
+      - name: triage-api
+        image: itincidenttriageacr.azurecr.io/it-incident-triage-api:latest  # Will point to ACR in cloud deployment
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 8000
+        resources:
+          requests:
+            memory: "64Mi"
+            cpu: "10m"
+          limits:
+            memory: "512Mi"
+            cpu: "250m"
+        livenessProbe:
+          httpGet:
+            path: /health/live
+            port: 8000
+          initialDelaySeconds: 15
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /health/ready
+            port: 8000
+          initialDelaySeconds: 10
+          periodSeconds: 5
+        securityContext:
+          runAsNonRoot: true
+          runAsUser: 1000
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
