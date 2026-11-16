@@ -14,8 +14,7 @@ import {
   Shield,
   Zap,
 } from 'lucide-react';
-
-const API_BASE = 'http://localhost:8000';
+import { API_BASE_URL } from '../config';
 
 const CATEGORY_META = {
   Database:       { icon: Database,  color: 'bg-blue-100 text-blue-700 border-blue-200' },
@@ -118,7 +117,7 @@ export default function TriagePortal() {
     };
 
     try {
-      const res = await fetch(`${API_BASE}/api/v1/incidents/predict`, {
+      const res = await fetch(`${API_BASE_URL}/api/v1/incidents/predict`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
@@ -133,7 +132,7 @@ export default function TriagePortal() {
     } catch (err) {
       if (err instanceof TypeError && err.message.includes('fetch')) {
         setError(
-          'Cannot connect to the backend at http://localhost:8000. Make sure the FastAPI server is running.',
+          `Cannot connect to the backend at ${API_BASE_URL}. Make sure the FastAPI server is running.`,
         );
       } else {
         setError(err.message);

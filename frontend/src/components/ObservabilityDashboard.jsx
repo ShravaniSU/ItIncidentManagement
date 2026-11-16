@@ -21,8 +21,8 @@ import {
   XAxis,
   YAxis,
 } from 'recharts';
+import { API_BASE_URL } from '../config';
 
-const API_BASE = 'http://localhost:8000';
 const POLL_INTERVAL_MS = 3000;
 
 /* ─── Prometheus text-format parsers ─── */
@@ -97,7 +97,7 @@ export default function ObservabilityDashboard() {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(`${API_BASE}/metrics`);
+      const res = await fetch(`${API_BASE_URL}/metrics`);
       if (!res.ok) throw new Error(`Server returned ${res.status}`);
       const text = await res.text();
       const parsed = parsePrometheusText(text);
@@ -119,7 +119,7 @@ export default function ObservabilityDashboard() {
       setCategoryDist(Object.entries(dist).map(([name, value]) => ({ name, value })));
     } catch (err) {
       if (err instanceof TypeError && err.message.includes('fetch')) {
-        setError('Cannot connect to the backend at http://localhost:8000. Make sure the FastAPI server is running.');
+        setError(`Cannot connect to the backend at ${API_BASE_URL}. Make sure the FastAPI server is running.`);
       } else {
         setError(err.message);
       }
