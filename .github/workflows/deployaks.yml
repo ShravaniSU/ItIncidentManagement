@@ -1,0 +1,96 @@
+name: CI/CD - Build and Deploy to AKS
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "src/**"
+      - "ml/**"
+      - "outputs/**"
+      - "k8s/**"
+      - "Dockerfile"
+      - "config.json"
+      - "environment.yml"
+      - ".github/workflows/deploy-aks.yml"
+  workflow_dispatch:
+    inputs:
+      deploy_to_aks:
+        description: "Push image to ACR and deploy to AKS"
+        required: true
+        default: "true"
+        type: choice
+        options:
+          - "true"
+          - "false"
+
+env:
+  AZURE_RESOURCE_GROUP: rg-incident-triage   # Update if you used a different RG name
+  AKS_CLUSTER_NAME: aks-incident-triage      # Update if you used a different AKS name
+  ACR_NAME: itincidenttriageacr
+  IMAGE_NAME: it-incident-triage-api
+  K8S_NAMESPACE: incident-triage-ns
+  DEPLOYMENT_NAME: incident-triage-api
+  CONTAINER_NAME: triage-api
+
+jobs:
+  ci-verify-build:
+    name: CI - Verify Container Build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Verify Docker Image Builds Cleanly
+        run: |
+          docker build -t ${{ env.IMAGE_NAME }}:${{ github.sha }} .
+
+  cd-deploy-aks:
+    name: CD - Push to ACR & Rollout to AKS
+    needs: ci-verify-build
+    # Runs only when manually triggered with deploy_to_aks == 'true' (prevents failed runs while RG is deleted)
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.deploy_to_aks == 'true'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Log in to Azure Container Registry (ACR)
+        run: az acr login --name ${{ env.ACR_NAME }}
+
+      - name: Build and Push Tagged Image to ACR
+        run: |
+          ACR_LOGIN_SERVER=${{ env.ACR_NAME }}.azurecr.io
+          IMAGE_TAG=${{ github.sha }}
+          docker build -t $ACR_LOGIN_SERVER/${{ env.IMAGE_NAME }}:$IMAGE_TAG .
+          docker build -t $ACR_LOGIN_SERVER/${{ env.IMAGE_NAME }}:latest .
+          docker push $ACR_LOGIN_SERVER/${{ env.IMAGE_NAME }}:$IMAGE_TAG
+          docker push $ACR_LOGIN_SERVER/${{ env.IMAGE_NAME }}:latest
+
+      - name: Get AKS Cluster Credentials
+        run: |
+          az aks get-credentials \
+            --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
+            --name ${{ env.AKS_CLUSTER_NAME }} \
+            --overwrite-existing
+
+      - name: Ensure Kubernetes Namespace Exists
+        run: |
+          kubectl create namespace ${{ env.K8S_NAMESPACE }} --dry-run=client -o yaml | kubectl apply -f -
+
+      - name: Apply Manifests and Rollout New Image to AKS
+        run: |
+          ACR_LOGIN_SERVER=${{ env.ACR_NAME }}.azurecr.io
+          kubectl apply -f k8s/ -n ${{ env.K8S_NAMESPACE }}
+          kubectl set image deployment/${{ env.DEPLOYMENT_NAME }} \
+            ${{ env.CONTAINER_NAME }}=$ACR_LOGIN_SERVER/${{ env.IMAGE_NAME }}:${{ github.sha }} \
+            -n ${{ env.K8S_NAMESPACE }}
+          kubectl rollout status deployment/${{ env.DEPLOYMENT_NAME }} \
+            -n ${{ env.K8S_NAMESPACE }} \
+            --timeout=180s
