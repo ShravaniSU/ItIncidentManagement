@@ -12,7 +12,7 @@ on:
       - "Dockerfile"
       - "config.json"
       - "environment.yml"
-      - ".github/workflows/deploy-aks.yml"
+      - ".github/workflows/deployaks.yml"
   workflow_dispatch:
     inputs:
       deploy_to_aks:
