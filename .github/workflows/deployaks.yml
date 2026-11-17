@@ -10,9 +10,8 @@ on:
       - "outputs/**"
       - "k8s/**"
       - "Dockerfile"
-      - "config.json"
       - "environment.yml"
-      - ".github/workflows/deployaks.yml"
+      - ".github/workflows/**"
   workflow_dispatch:
     inputs:
       deploy_to_aks:
@@ -25,8 +24,8 @@ on:
           - "false"
 
 env:
-  AZURE_RESOURCE_GROUP: rg-incident-triage   # Update if you used a different RG name
-  AKS_CLUSTER_NAME: aks-incident-triage      # Update if you used a different AKS name
+  AZURE_RESOURCE_GROUP: rg-incident-triage
+  AKS_CLUSTER_NAME: aks-incident-triage
   ACR_NAME: itincidenttriageacr
   IMAGE_NAME: it-incident-triage-api
   K8S_NAMESPACE: incident-triage-ns
@@ -41,6 +40,16 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
+      - name: Generate config.json from Secret (or CI Fallback)
+        env:
+          AZURE_CONFIG_JSON: ${{ secrets.AZURE_CONFIG_JSON }}
+        run: |
+          if [ -n "$AZURE_CONFIG_JSON" ]; then
+            printf '%s' "$AZURE_CONFIG_JSON" > config.json
+          else
+            echo '{"subscription_id":"00000000-0000-0000-0000-000000000000","resource_group":"ci-placeholder","workspace_name":"ci-placeholder"}' > config.json
+          fi
+
       - name: Verify Docker Image Builds Cleanly
         run: |
           docker build -t ${{ env.IMAGE_NAME }}:${{ github.sha }} .
@@ -48,13 +57,22 @@ jobs:
   cd-deploy-aks:
     name: CD - Push to ACR & Rollout to AKS
     needs: ci-verify-build
-    # Runs only when manually triggered with deploy_to_aks == 'true' (prevents failed runs while RG is deleted)
     if: github.event_name == 'workflow_dispatch' && github.event.inputs.deploy_to_aks == 'true'
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
+
+      - name: Generate config.json from GitHub Secret
+        env:
+          AZURE_CONFIG_JSON: ${{ secrets.AZURE_CONFIG_JSON }}
+        run: |
+          if [ -z "$AZURE_CONFIG_JSON" ]; then
+            echo "Error: AZURE_CONFIG_JSON secret is not set."
+            exit 1
+          fi
+          printf '%s' "$AZURE_CONFIG_JSON" > config.json
 
       - name: Azure Login
         uses: azure/login@v2
